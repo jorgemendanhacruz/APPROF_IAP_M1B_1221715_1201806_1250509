@@ -1,0 +1,777 @@
+================================================================================
+CONTEÚDO PARA ARTIGO CIENTÍFICO — APPROF 2025/2026
+Formato: IEEE | Língua: Português Europeu | Máx. 8 páginas
+================================================================================
+
+## SECÇÃO 1 — RESUMO (Abstract)
+
+O presente trabalho aborda dois problemas clássicos de aprendizagem profunda:
+a classificação de imagens de frutos e a previsão de séries temporais
+meteorológicas. No primeiro problema, foram desenvolvidas redes neuronais
+convolucionais (CNN) para classificar 144 classes de frutos do dataset
+Fruits-360, comparando sistematicamente o efeito do número de filtros, do
+stride, do tipo de pooling e de técnicas de regularização, e confrontando uma
+CNN desenvolvida de raiz com um modelo pré-treinado (MobileNetV2) ajustado por
+fine-tuning. O modelo final, baseado em MobileNetV2 com fine-tuning das 40
+camadas superiores, atingiu no conjunto de teste uma exatidão de 93,96%, com
+precisão e revocação macro de 0,9513, superando claramente os limiares
+definidos (exatidão > 80%; precisão e revocação > 70%). No segundo problema,
+foram treinadas redes recorrentes (SimpleRNN, LSTM, LSTM empilhada e LSTM
+bidirecional) para prever a temperatura a 24 horas com o dataset Jena Climate,
+avaliando três janelas temporais de entrada (24, 72 e 168 horas). A melhor
+configuração — uma LSTM com 128 unidades e janela de 168 horas — obteve um
+RMSLE de 0,06276 no conjunto de teste (limiar: < 1), correspondendo a um RMSE
+de 2,97 °C e um MAE de 2,35 °C. Conclui-se que a transferência de aprendizagem
+acelera e melhora a classificação de imagem com esforço computacional reduzido,
+e que janelas temporais mais longas, combinadas com células LSTM, melhoram a
+previsão de temperatura a 24 horas.
+
+---
+
+## SECÇÃO 2 — INTRODUÇÃO
+
+### 2.1 Motivação e Contexto
+
+As redes neuronais convolucionais constituem a abordagem dominante em visão
+por computador, devido à sua capacidade de aprender hierarquias de
+características espaciais — desde arestas e gradientes de cor, nas primeiras
+camadas, até formas e padrões complexos, nas camadas profundas [1][3]. No
+presente trabalho, esta capacidade é explorada na classificação de 144
+variedades de frutos, um problema com elevado número de classes e forte
+semelhança visual entre algumas delas (por exemplo, variedades distintas de
+pera), tendo o melhor modelo atingido 93,96% de exatidão no conjunto de teste.
+
+As redes neuronais recorrentes, em particular as redes com memória de longo
+prazo (LSTM), foram concebidas para modelar dependências sequenciais,
+mitigando o problema do desvanecimento do gradiente que afeta as RNN simples
+[1][3]. A previsão de temperatura a 24 horas a partir de observações
+meteorológicas históricas é um caso de estudo representativo: a série exibe
+forte periodicidade diária e sazonal, e os resultados obtidos (RMSLE de
+0,06276 com janela de 168 horas) confirmam que o contexto temporal alargado
+beneficia a previsão.
+
+### 2.2 Objetivos
+
+Os objetivos específicos do trabalho são:
+
+- CNN: avaliar o impacto do número de filtros, do stride, do padding e do
+  tipo de pooling no desempenho de classificação; estudar o efeito do data
+  augmentation; detetar e mitigar overfitting através de Dropout,
+  regularização L2 e paragem antecipada; aplicar transfer learning com um
+  modelo pré-treinado e comparar com a CNN desenvolvida de raiz; visualizar
+  os mapas de características aprendidos; analisar os melhores e piores casos
+  de classificação.
+- RNN: comparar camadas LSTM (simples, empilhadas e bidirecionais) com a RNN
+  simples; avaliar o impacto de diferentes janelas temporais de entrada (24,
+  72 e 168 horas) na previsão a 24 horas; avaliar o desempenho com a métrica
+  RMSLE, com o objetivo de obter um valor inferior a 1.
+
+### 2.3 Estrutura do Artigo
+
+A Secção 3 descreve o problema de classificação de frutos: dataset,
+pré-processamento, arquitetura, experiências, data augmentation, análise de
+overfitting, transfer learning e avaliação final. A Secção 4 descreve o
+problema de previsão de temperatura: dataset, pré-processamento, arquiteturas
+recorrentes, janelas temporais e avaliação. A Secção 5 discute e compara os
+resultados, respondendo às questões do enunciado, e identifica limitações.
+A Secção 6 apresenta as conclusões.
+
+---
+
+## SECÇÃO 3 — MODELO CNN (Fruits-360)
+
+### 3.1 Descrição do Dataset
+
+Foi utilizada a variante "original-size" do dataset Fruits-360 [5], obtida
+através da plataforma Kaggle, com a seguinte composição:
+
+- Número de classes: 144 (variedades de frutos e legumes);
+- Conjunto de treino original: 51 345 imagens, repartidas em 41 076 para
+  treino efetivo e 10 269 para validação (divisão 80/20 com semente fixa);
+- Conjunto de teste: 25 526 imagens;
+- Dimensão das imagens: variável (exemplo amostrado: 221×139 píxeis, RGB),
+  com fundo predominantemente branco e um único fruto centrado;
+- Distribuição de classes: aproximadamente equilibrada, mas não uniforme —
+  mínimo de 96 e máximo de 648 imagens por classe no treino (média de 356,6).
+
+[FIGURA 1: Distribuição do número de imagens de treino por classe (40 classes
+mais frequentes) — ficheiro figures/cnn_01_class_distribution.png]
+[FIGURA 2: Grelha de imagens de exemplo, uma por classe — ficheiro
+figures/cnn_02_sample_grid.png]
+
+Pré-processamento aplicado e justificação:
+
+| Passo | Justificação |
+|---|---|
+| Redimensionamento para 64×64 | Reduz memória e custo computacional, mantendo detalhe espacial suficiente para distinguir frutos. |
+| Normalização para [0, 1] (divisão por 255) | Entradas de pequena amplitude aceleram a convergência do gradiente. |
+| Divisão treino/validação 80/20 | Conjunto de validação suficientemente grande para estimar a generalização sem sacrificar dados de treino. |
+| Baralhamento do conjunto de treino | Evita que os mini-lotes reflitam a ordem alfabética das classes no disco. |
+
+### 3.2 Metodologia e Arquitetura
+
+A CNN desenvolvida de raiz é uma rede sequencial com três blocos
+convolucionais, cada um composto por convolução 3×3 (stride 1, padding
+"same", ativação ReLU), normalização de lote (Batch Normalization) e
+max-pooling 2×2, seguidos de uma camada totalmente ligada. A configuração
+vencedora da pesquisa sistemática (Secção 3.3) usa 32, 64 e 128 filtros nos
+três blocos, uma camada densa de 256 unidades com Dropout de 0,4 e
+regularização L2 de 1×10⁻⁴, e uma camada de saída softmax com 144 unidades.
+
+Resumo do modelo (output do model.summary()):
+
+  Conv2D (32 filtros, 3×3)      → (None, 64, 64, 32)      896 parâmetros
+  BatchNormalization            → (None, 64, 64, 32)      128
+  MaxPooling2D (2×2)            → (None, 32, 32, 32)      0
+  Conv2D (64 filtros, 3×3)      → (None, 32, 32, 64)      18 496
+  BatchNormalization            → (None, 32, 32, 64)      256
+  MaxPooling2D (2×2)            → (None, 16, 16, 64)      0
+  Conv2D (128 filtros, 3×3)     → (None, 16, 16, 128)     73 856
+  BatchNormalization            → (None, 16, 16, 128)     512
+  MaxPooling2D (2×2)            → (None, 8, 8, 128)       0
+  Flatten                       → (None, 8192)            0
+  Dense (256, ReLU)             → (None, 256)             2 097 408
+  Dropout (0,4)                 → (None, 256)             0
+  Dense (144, softmax)          → (None, 144)             37 008
+  ----------------------------------------------------------------
+  Total: 2 228 560 parâmetros (2 228 112 treináveis)
+
+Escolhas de treino e justificação:
+- Função de perda: entropia cruzada categórica esparsa (sparse categorical
+  crossentropy), adequada a classificação multiclasse com rótulos inteiros;
+- Otimizador: Adam (taxa de aprendizagem inicial de 1×10⁻³), pela sua
+  robustez e adaptação automática da taxa de aprendizagem por parâmetro;
+- Métrica: exatidão (accuracy), complementada na avaliação final por
+  precisão e revocação macro;
+- Tamanho do lote: 64; paragem antecipada (EarlyStopping) sobre a exatidão
+  de validação com paciência de 3 épocas e reposição dos melhores pesos;
+  redução da taxa de aprendizagem em patamar (ReduceLROnPlateau, fator 0,5,
+  paciência 2).
+
+### 3.2.1 Diagrama da Arquitetura da Rede
+
+[FIGURA 3: Diagrama da arquitetura do modelo CNN, gerado com
+keras.utils.plot_model() — ficheiro figures/cnn_03_architecture.png]
+
+O diagrama representa o fluxo sequencial Input (64×64×3) → [Conv2D 32 →
+BatchNorm → MaxPool] → [Conv2D 64 → BatchNorm → MaxPool] → [Conv2D 128 →
+BatchNorm → MaxPool] → Flatten → Dense 256 → Dropout 0,4 → Dense 144
+(softmax), com as dimensões de saída e o número de parâmetros indicados na
+tabela da Secção 3.2. Os três blocos convolucionais constituem o bloco de
+extração de características (reduzindo progressivamente a resolução espacial
+de 64×64 para 8×8 enquanto aumentam a profundidade de 32 para 128 canais) e
+as camadas densas finais constituem o bloco de classificação.
+
+### 3.3 Experiências Realizadas
+
+Foram treinadas quatro variantes da arquitetura durante 5 épocas cada, com a
+mesma semente aleatória, variando filtros, stride e tipo de pooling. A melhor
+exatidão de validação de cada experiência foi:
+
+[TABELA 1: Experiências de arquitetura CNN — exatidão de validação]
+
+| Experiência | Filtros | Stride | Padding | Pooling | Exatidão Val. |
+|---|---|---|---|---|---|
+| Base (Baseline) | (32, 64, 128) | 1 | same | max | 0,9985 |
+| Menos filtros | (16, 32, 64) | 1 | same | max | 0,9966 |
+| Average pooling | (32, 64, 128) | 1 | same | avg | 0,9943 |
+| Stride=2 (sem pooling efetivo) | (32, 64, 128) | 2 | same | max | 0,9706 |
+
+Conclusões comparativas:
+- Filtros: reduzir o número de filtros para metade degradou ligeiramente o
+  desempenho (0,9966 vs. 0,9985), indicando que a capacidade adicional é
+  útil mas não crítica neste problema;
+- Pooling: o max-pooling superou o average-pooling (0,9985 vs. 0,9943),
+  coerente com a natureza do problema — as características discriminantes
+  (contornos, texturas) são ativações localizadas que o máximo preserva
+  melhor do que a média;
+- Stride: substituir a redução por pooling por convoluções com stride 2
+  produziu a maior degradação (0,9706), embora com tempo de treino cerca de
+  cinco vezes inferior (≈34 s vs. ≈185 s por época), evidenciando o
+  compromisso entre custo computacional e qualidade da subamostragem.
+
+A melhor configuração foi retreinada com regularização (Dropout 0,4 e L2
+1×10⁻⁴) durante 6 épocas, atingindo 0,9981 de exatidão de validação.
+
+### 3.4 Data Augmentation
+
+Foi definida uma cadeia de aumento de dados com transformações aleatórias que
+preservam o rótulo: espelhamento horizontal, rotação (±10% de uma volta),
+zoom (±10%), translação (±5%) e variação de brilho (±10%). A comparação foi
+feita treinando a mesma arquitetura, com a mesma semente, com e sem
+augmentation, durante 5 épocas.
+
+Resultados obtidos:
+- Sem augmentation: exatidão de validação máxima de 0,9791;
+- Com augmentation: o treino colapsou, com exatidão de treino estagnada em
+  ≈1,2% e exatidão de validação de 0,0 em todas as épocas.
+
+[FIGURA 4: Curvas de exatidão e perda, com e sem augmentation — ficheiro
+figures/cnn_04_augmentation_comparison.png]
+
+Análise: o colapso deve-se a um erro na ordem de aplicação das
+transformações. A camada RandomBrightness do Keras opera, por omissão, na
+gama de valores [0, 255]; ao ser aplicada sobre imagens já normalizadas para
+[0, 1], introduz desvios de brilho até ±25,5 — duas ordens de grandeza acima
+da amplitude do sinal — destruindo a informação visual das imagens. Em
+consequência, a comparação com/sem augmentation ficou inconclusiva neste
+trabalho: não foi possível medir o benefício real do aumento de dados, apenas
+constatar a sensibilidade do pipeline à coerência entre a gama de valores das
+imagens e a parametrização das camadas de augmentation. Esta limitação é
+retomada na Secção 5.3.
+
+### 3.5 Análise de Overfitting
+
+Para demonstrar a deteção de overfitting, foi deliberadamente treinado um
+modelo sobredimensionado (filtros 128/256/512, sem Dropout nem L2, sem
+paragem antecipada) durante 6 épocas. Observou-se o padrão típico: a exatidão
+de treino subiu de 0,5318 para 0,9718, enquanto a exatidão de validação
+oscilou (0,8331 → 0,9900 → 0,9494 → 0,9758 → 0,9600) e a perda de validação
+divergiu da perda de treino a partir da 3.ª época (val_loss 0,0389 → 0,1725,
+com train_loss a descer de 0,1950 para 0,1097), evidenciando memorização dos
+dados de treino.
+
+[FIGURA 5: Curvas de exatidão e perda — modelo sem regularização vs. modelo
+regularizado — ficheiro figures/cnn_05_overfitting_analysis.png]
+
+Mitigações aplicadas no modelo final: Dropout de 0,4 na camada densa,
+regularização L2 de 1×10⁻⁴ nos pesos, e paragem antecipada com reposição dos
+melhores pesos. Com estas técnicas, o modelo final manteve a exatidão de
+validação (0,9981) próxima da exatidão de treino, sem divergência da perda de
+validação. Nota de transparência: a variante regularizada do modelo
+sobredimensionado foi treinada sobre o conjunto com augmentation defeituoso
+(Secção 3.4), pelo que os seus resultados (exatidão de validação 0,0) não são
+interpretáveis; a eficácia da regularização é demonstrada pelo modelo final.
+
+### 3.6 Transfer Learning
+
+**Modelo pré-treinado escolhido: MobileNetV2** (pesos ImageNet, sem o topo de
+classificação).
+
+**Justificação da escolha:** O MobileNetV2 foi selecionado por reunir quatro
+propriedades adequadas a este problema: (i) é um modelo leve, com apenas
+2,26 M de parâmetros na base convolucional — comparável à dimensão da CNN de
+raiz (2,23 M) e muito inferior a alternativas como a ResNet50 (≈23,6 M) ou a
+VGG16 (≈14,7 M), o que é determinante num ambiente de treino exclusivamente
+em CPU; (ii) aceita entradas de pequena dimensão (mínimo 32×32), sendo
+compatível com as imagens do Fruits-360 redimensionadas para 96×96, ao
+contrário de modelos que requerem entradas de 224×224 para tirar partido dos
+pesos pré-treinados; (iii) as suas camadas convolucionais, pré-treinadas em
+ImageNet (~1,2 M de imagens, 1000 classes), codificam características de
+baixo nível (arestas, texturas) e nível intermédio (formas, partes de
+objetos) diretamente transferíveis para imagens de frutos; (iv) está
+disponível de forma nativa em tf.keras.applications, com a respetiva função
+de pré-processamento (escala [-1, 1]). A ResNet50 foi preterida pelo custo
+computacional em CPU; a VGG16, pelo elevado número de parâmetros e ausência
+de normalização de lote.
+
+**Estratégia de fine-tuning (duas fases):**
+- Fase 1 — base totalmente congelada; treino apenas da cabeça nova
+  (GlobalAveragePooling2D → Dense 256 ReLU → Dropout 0,4 → Dense 144
+  softmax; 364 944 parâmetros treináveis em 2 622 928 totais), com Adam e
+  taxa de aprendizagem de 1×10⁻³, durante 3 épocas → exatidão de validação
+  de 0,9981;
+- Fase 2 — descongelamento das 40 camadas superiores da base (restantes
+  camadas congeladas), com taxa de aprendizagem reduzida para 1×10⁻⁵ para
+  não destruir os pesos pré-treinados, durante até 4 épocas com paragem
+  antecipada → exatidão de validação de 0,9998.
+
+**Comparação com a CNN desenvolvida de raiz (regra do enunciado):** o modelo
+pré-treinado não foi usado isoladamente; foi-lhe adicionada uma cabeça de
+classificação treinada de raiz e o seu desempenho foi comparado com o da CNN
+própria, nas mesmas condições de dados.
+
+[TABELA 2: Comparação entre a CNN de raiz e o modelo pré-treinado]
+
+| Modelo | Exatidão (validação) | Exatidão (teste) | Precisão (teste, macro) | Revocação (teste, macro) | F1-Score (teste, macro) |
+|---|---|---|---|---|---|
+| CNN desenvolvida de raiz | 0,9981 | [DADOS INSUFICIENTES — o modelo de raiz não foi avaliado no conjunto de teste no notebook] | [DADOS INSUFICIENTES] | [DADOS INSUFICIENTES] | [DADOS INSUFICIENTES] |
+| MobileNetV2 (fine-tuning) | 0,9998 | 0,9396 | 0,9513 | 0,9513 | [DADOS INSUFICIENTES — média macro do F1 não impressa no notebook] |
+
+**Conclusão:** o MobileNetV2 com fine-tuning superou a CNN de raiz na
+validação (0,9998 vs. 0,9981) e foi adotado como modelo final. A justificação
+é dupla: melhor desempenho de validação e maior robustez esperada das
+características pré-treinadas em ImageNet. Sublinha-se que a diferença é
+pequena (0,17 pontos percentuais), o que mostra que a CNN de raiz é, por si
+só, competitiva e cumpre os requisitos do enunciado.
+
+### 3.7 Visualização das Convoluções
+
+Foram visualizados os 16 primeiros mapas de características da primeira
+camada convolucional da CNN de raiz, para três imagens de teste, através de
+um submodelo que expõe as ativações dessa camada.
+
+[FIGURA 6: Mapas de características da primeira camada convolucional para
+três imagens de teste — ficheiros figures/cnn_08_feature_maps_img1.png,
+cnn_08_feature_maps_img2.png e cnn_08_feature_maps_img3.png]
+
+Observa-se que os diferentes filtros da primeira camada se especializam em
+características de baixo nível: alguns respondem aos contornos do fruto
+contra o fundo branco, outros a gradientes de intensidade e a regiões de cor
+homogénea. Este comportamento é consistente com a literatura: as primeiras
+camadas de uma CNN aprendem detetores genéricos de arestas e cor, sendo a
+composição destas respostas, nas camadas seguintes, que produz representações
+específicas das classes [1][3].
+
+### 3.8 Melhores e Piores Casos
+
+Os exemplos foram ordenados pela confiança que o modelo final atribui à
+classe correta.
+
+Melhores casos (confiança 1,00 na classe correta):
+1. "Cantaloupe 3" — fruto bem iluminado e centrado, classificado corretamente;
+2. "Cactus fruit red 1" — textura e cor distintivas, classificado corretamente;
+3. "Dates 2" — forma característica, classificado corretamente.
+
+[FIGURA 7: Três melhores casos de classificação — ficheiro
+figures/cnn_10_best_predictions.png]
+
+Piores casos (confiança ≈0,00 na classe correta): os três piores exemplos são
+imagens da classe "Pear 3", todas classificadas como "Pear common 1".
+
+[FIGURA 8: Três piores casos de classificação — ficheiro
+figures/cnn_09_worst_predictions.png]
+
+Análise dos erros: a análise por classe (Secção 3.9) mostra que sete
+variedades de pera ("Pear 3", "Pear 5", "Pear 6", "Pear 7", "Pear 8",
+"Pear 9" e "Pear common 1") obtiveram F1 de 0,0 no teste, sendo
+sistematicamente confundidas entre si. Trata-se de classes com elevadíssima
+semelhança intraclasse — a distinção entre variedades de pera assenta em
+diferenças subtis de tonalidade e forma que se perdem parcialmente no
+redimensionamento para resoluções baixas. Estes erros concentram a quase
+totalidade da perda de exatidão do modelo (93,96% global), enquanto classes
+visualmente distintivas atingem F1 próximo de 1,0 (por exemplo, "Orange 2"
+com 0,9957 e "Pepper Red 3" com 1,0000).
+
+[FIGURA 9: Matriz de confusão no conjunto de teste — ficheiro
+figures/cnn_06_confusion_matrix.png]
+[FIGURA 10: 20 classes com menor e maior exatidão por classe — ficheiro
+figures/cnn_07_per_class_accuracy.png]
+
+### 3.9 Resultados Finais do Modelo CNN
+
+[TABELA 3: Resultados finais do modelo adotado (MobileNetV2 fine-tuned) no
+conjunto de teste (25 526 imagens, 144 classes)]
+
+| Métrica | Valor | Limiar do enunciado | Cumprido |
+|---|---|---|---|
+| Exatidão (accuracy) | 0,9396 (93,96%) | > 80% | Sim |
+| Precisão (média macro) | 0,9513 | > 0,70 | Sim |
+| Revocação (média macro) | 0,9513 | > 0,70 | Sim |
+| F1-Score (média macro) | [DADOS INSUFICIENTES — não impresso no notebook; valores por classe disponíveis] | — | — |
+
+Todos os limiares quantitativos do enunciado foram superados com margem
+confortável.
+
+---
+
+## SECÇÃO 4 — MODELO RNN (Jena Climate)
+
+### 4.1 Descrição do Dataset
+
+Foi utilizado o dataset Jena Climate [6], com medições meteorológicas
+registadas no Instituto Max Planck de Biogeoquímica, em Jena, Alemanha:
+
+- Período temporal: 1 de janeiro de 2009 (00:10) a 1 de janeiro de 2017
+  (00:00);
+- Frequência de amostragem original: 10 minutos (420 551 observações);
+- Variáveis: 14 grandezas numéricas — pressão (mbar), temperatura (°C),
+  temperatura potencial (K), temperatura do ponto de orvalho (°C), humidade
+  relativa (%), pressões de vapor (máxima, atual e défice, em mbar),
+  humidade específica (g/kg), concentração de vapor de água (mmol/mol),
+  densidade do ar (g/m³), velocidade do vento (média e máxima, m/s) e
+  direção do vento (graus);
+- Variável alvo: temperatura do ar, "T (degC)" (média 9,45 °C; desvio-padrão
+  8,42 °C; mínimo −23,01 °C; máximo 37,28 °C);
+- Valores em falta: nenhum no ficheiro original.
+
+[FIGURA 11: Série completa de temperatura (2009–2016) — ficheiro
+figures/rnn_01_temperature_full.png]
+[FIGURA 12: Temperatura no ano de 2013 (ciclos sazonal e diário) — ficheiro
+figures/rnn_02_temperature_2013.png]
+
+Pré-processamento aplicado e justificação:
+
+| Passo | Justificação |
+|---|---|
+| Reamostragem para intervalos de 1 hora (média) | A resolução de 10 min é redundante para previsão a 24 h; a resolução horária preserva a periodicidade diária e reduz o comprimento das sequências (420 551 → 70 129 observações). |
+| Preenchimento progressivo (forward-fill) de lacunas | Garante a ausência de NaN após a reamostragem; as lacunas são raras e curtas. |
+| Normalização z-score com estatísticas do treino | As RNN são sensíveis à escala das entradas; usar apenas as estatísticas do treino evita fuga de informação dos conjuntos de validação e teste. |
+| Divisão cronológica 70/15/15 sem baralhamento | Em séries temporais, dados futuros nunca podem aparecer no treino: 49 090 horas de treino (2045 dias), 10 519 de validação (438 dias) e 10 520 de teste (438 dias). |
+
+As entradas são janelas deslizantes multivariadas (as 14 variáveis) e o alvo
+é a temperatura 24 horas após o fim da janela. Foram geradas janelas de 24,
+72 e 168 horas; por exemplo, para a janela de 168 h, os tensores resultantes
+foram X_train (48 899, 168, 14), X_val (10 328, 168, 14) e X_test
+(10 329, 168, 14).
+
+### 4.2 Metodologia e Arquitetura
+
+Foram comparadas quatro arquiteturas recorrentes — SimpleRNN, LSTM, LSTM
+empilhada (duas camadas) e LSTM bidirecional — todas terminadas em
+Dense(32, ReLU) → Dense(1). A melhor configuração foi:
+
+- Tipo de camada: LSTM (uma única camada recorrente);
+- Unidades: 128, com dropout de 0,2;
+- Janela temporal de entrada: 168 horas (1 semana), com 14 variáveis
+  (input_shape = (168, 14));
+- Horizonte de previsão: 24 horas;
+- Função de perda: erro quadrático médio (MSE) — adequada à regressão e
+  diferenciável de forma estável, ao contrário do RMSLE direto, que exigiria
+  cuidados adicionais com valores negativos durante o treino; o RMSLE foi
+  usado como métrica de avaliação, conforme o enunciado;
+- Otimizador: Adam (taxa de aprendizagem inicial de 1×10⁻³), com redução em
+  patamar (fator 0,5, paciência 3);
+- Métrica: RMSLE. Como a temperatura normalizada pode ser negativa e o
+  logaritmo log1p exige valores > −1, foi aplicado um desvio constante de
+  4,6742 (valor absoluto do mínimo do treino mais uma margem de 1,0) a
+  previsões e valores reais, de forma consistente em todos os modelos, para
+  garantir comparações justas;
+- Treino: lotes de 256, máximo de 50 épocas, paragem antecipada sobre a
+  perda de validação (paciência 5, reposição dos melhores pesos).
+
+### 4.2.1 Diagrama da Arquitetura da Rede
+
+O notebook não gerou ficheiro de diagrama via plot_model(); a arquitetura do
+melhor modelo, extraída do model.summary(), é a seguinte (descrição textual
+reproduzível graficamente):
+
+  Input (None, 168, 14) — janela de 168 horas × 14 variáveis
+      ↓
+  LSTM (128 unidades, dropout 0,2)  → (None, 128)    73 216 parâmetros
+      ↓
+  Dense (32, ReLU)                  → (None, 32)      4 128 parâmetros
+      ↓
+  Dense (1, linear)                 → (None, 1)          33 parâmetros
+  ----------------------------------------------------------------
+  Total de parâmetros treináveis: 77 377
+
+Trata-se de uma rede recorrente simples (não empilhada e não bidirecional):
+a camada LSTM consome a sequência completa e devolve apenas o último estado
+oculto (return_sequences=False), que o bloco denso converte na previsão
+escalar de temperatura.
+
+### 4.3 Experiências Realizadas
+
+#### 4.3.1 Impacto do Tipo de Camada (LSTM vs RNN Simples)
+
+Com 128 unidades, dropout de 0,2 e a mesma cadeia de treino, os resultados de
+RMSLE no conjunto de teste por arquitetura foram:
+
+| Arquitetura | Janela 24 h | Janela 72 h | Janela 168 h |
+|---|---|---|---|
+| SimpleRNN | 0,06804 | 0,06340 | 0,06436 |
+| LSTM | 0,06606 | 0,06367 | 0,06276 |
+| LSTM empilhada | 0,06547 | 0,06390 | 0,06328 |
+| LSTM bidirecional | 0,06645 | 0,06668 | 0,06447 |
+
+Conclusões:
+- A LSTM superou a RNN simples na janela mais curta (0,06606 vs. 0,06804) e
+  na mais longa (0,06276 vs. 0,06436), confirmando a vantagem do mecanismo
+  de portas na retenção de dependências longas; na janela de 168 h, a RNN
+  simples precisou de 21 épocas para convergir contra 8 da LSTM;
+- Curiosamente, na janela intermédia (72 h) a RNN simples foi marginalmente
+  melhor (0,06340 vs. 0,06367), indicando que, para sequências de
+  comprimento moderado neste problema fortemente periódico, o
+  desvanecimento do gradiente ainda não é limitativo;
+- O empilhamento de LSTM não trouxe ganhos face à LSTM simples, e a variante
+  bidirecional foi consistentemente a pior das LSTM — o que é expectável em
+  previsão causal, onde não existe contexto "futuro" a explorar dentro da
+  janela e a bidirecionalidade apenas duplica os parâmetros.
+
+#### 4.3.2 Impacto da Janela Temporal
+
+Para a melhor arquitetura (LSTM), o RMSLE de teste melhorou de forma
+monótona com o alargamento da janela: 0,06606 (24 h) → 0,06367 (72 h) →
+0,06276 (168 h). A janela de uma semana permite ao modelo captar, além do
+ciclo diário, a tendência sinótica de vários dias (frentes meteorológicas),
+que é informativa para o horizonte de 24 horas. O custo é o aumento do tempo
+por época e do consumo de memória, proporcionais ao comprimento da sequência.
+
+[FIGURA 13: Curvas de aprendizagem (perda MSE de treino e validação) da LSTM
+para as três janelas — ficheiro figures/rnn_03_training_curves.png]
+
+A análise das curvas de aprendizagem mostra ainda que o gap entre perda de
+validação e de treino nas últimas épocas diminui com o aumento da janela
+(0,0517 com 24 h; 0,0291 com 72 h; 0,0237 com 168 h), tendo a paragem
+antecipada atuado em todas as configurações (21, 10 e 8 épocas executadas,
+respetivamente, num máximo de 50).
+
+#### 4.3.3 Combinações de Camadas e Janelas
+
+[TABELA 4: Síntese das 12 combinações testadas (128 unidades, dropout 0,2),
+ordenadas por RMSLE de teste]
+
+| Arquitetura | Janela (h) | RMSLE Teste | Épocas executadas |
+|---|---|---|---|
+| LSTM | 168 | 0,06276 | 8 |
+| LSTM empilhada | 168 | 0,06328 | 8 |
+| SimpleRNN | 72 | 0,06340 | 14 |
+| LSTM | 72 | 0,06367 | 10 |
+| LSTM empilhada | 72 | 0,06390 | 12 |
+| SimpleRNN | 168 | 0,06436 | 21 |
+| LSTM bidirecional | 168 | 0,06447 | 7 |
+| LSTM empilhada | 24 | 0,06547 | 17 |
+| LSTM | 24 | 0,06606 | 21 |
+| LSTM bidirecional | 24 | 0,06645 | 18 |
+| LSTM bidirecional | 72 | 0,06668 | 10 |
+| SimpleRNN | 24 | 0,06804 | 6 |
+
+A melhor combinação é LSTM com janela de 168 horas (RMSLE = 0,06276).
+Nota metodológica: embora o código previsse a variação do número de unidades
+(32, 64, 128) e do dropout (0,0 e 0,2), a avaliação em teste foi realizada
+apenas para a última configuração de cada ciclo (128 unidades, dropout 0,2),
+pelo que a tabela reflete exclusivamente essa configuração por par
+arquitetura×janela.
+
+### 4.4 Melhores e Piores Casos
+
+Os exemplos foram ordenados pelo erro absoluto da previsão no conjunto de
+teste (modelo LSTM, janela de 168 h).
+
+Melhores casos (erro ≈0,00 °C): três janelas de períodos quentes e estáveis,
+com ciclos diários regulares, em que o modelo previu 15,3 °C, 15,7 °C e
+15,3 °C, coincidentes com os valores reais.
+
+[FIGURA 14: Três melhores janelas de previsão — ficheiro
+figures/rnn_06_best_windows.png]
+
+Piores casos (erros de 11,02 °C, 11,06 °C e 11,32 °C): as três piores janelas
+correspondem ao mesmo episódio meteorológico de inverno — uma descida brusca
+de temperatura, em que valores reais de −13,6 °C, −11,9 °C e −12,4 °C foram
+previstos como −2,6 °C, −0,8 °C e −1,1 °C, respetivamente.
+
+[FIGURA 15: Três piores janelas de previsão — ficheiro
+figures/rnn_07_worst_windows.png]
+
+Análise dos erros: nas três janelas, a série de entrada termina perto de
+0 °C após oscilações acentuadas, e a temperatura real desce mais de 10 °C nas
+24 horas seguintes (vaga de frio). O modelo, treinado para minimizar o MSE,
+tende a prever valores próximos da continuação suave do padrão recente,
+subestimando variações extremas e raras. Este comportamento — bom desempenho
+em regimes estáveis e degradação em transições bruscas — é visível também no
+gráfico de dispersão previsto vs. real, onde os pontos extremos se afastam da
+diagonal.
+
+[FIGURA 16: Previsto vs. real nas primeiras 500 horas de teste — ficheiro
+figures/rnn_04_pred_vs_actual.png]
+[FIGURA 17: Diagrama de dispersão previsto vs. real — ficheiro
+figures/rnn_05_scatter.png]
+
+### 4.5 Resultados Finais do Modelo RNN
+
+[TABELA 5: Resultados finais do melhor modelo (LSTM, 128 unidades, dropout
+0,2, janela de 168 h) no conjunto de teste]
+
+| Métrica | Valor | Limiar do enunciado | Cumprido |
+|---|---|---|---|
+| RMSLE | 0,06276 | < 1 | Sim |
+| RMSE | 2,9672 °C | — | — |
+| MAE | 2,3480 °C | — | — |
+
+O RMSLE obtido é cerca de 16 vezes inferior ao limiar exigido. Em termos
+físicos, o modelo prevê a temperatura a 24 horas com um erro médio absoluto
+de aproximadamente 2,35 °C.
+
+---
+
+## SECÇÃO 5 — ANÁLISE E DISCUSSÃO DE RESULTADOS
+
+### 5.1 Síntese Comparativa — CNN
+
+- Melhor configuração: o modelo final adotado foi o MobileNetV2 com
+  fine-tuning das 40 camadas superiores (exatidão de validação de 0,9998),
+  ligeiramente superior à melhor CNN de raiz (0,9981) — três blocos
+  convolucionais (32/64/128 filtros 3×3, stride 1, padding "same"),
+  max-pooling, Batch Normalization, Dropout 0,4 e L2 1×10⁻⁴.
+- Filtros, stride, padding e pooling: mais filtros melhoraram marginalmente o
+  desempenho; o max-pooling foi superior ao average-pooling por preservar as
+  ativações localizadas discriminantes; o stride 2 como substituto do
+  pooling degradou a exatidão (−2,8 p.p. face à base), embora reduzindo o
+  tempo de treino para cerca de um quinto; o padding "same" foi mantido em
+  todas as experiências para preservar a resolução espacial à entrada de
+  cada bloco.
+- Data augmentation: a experiência ficou inconclusiva devido à aplicação da
+  variação de brilho numa gama de valores incompatível com a normalização
+  prévia das imagens (Secção 3.4).
+- Overfitting: foi demonstrado num modelo sobredimensionado sem
+  regularização (divergência da perda de validação a partir da 3.ª época) e
+  mitigado no modelo final com Dropout, L2 e paragem antecipada.
+- Transfer learning: confirmou-se o benefício esperado — convergência em
+  menos épocas e melhor exatidão de validação com uma fração dos parâmetros
+  treináveis (364 944 na fase 1), validando a transferência de
+  características do ImageNet para o domínio dos frutos.
+- Limiar do enunciado: exatidão de teste de 93,96% (> 80%), precisão e
+  revocação macro de 0,9513 (> 0,70) — objetivos cumpridos.
+
+### 5.2 Síntese Comparativa — RNN
+
+- Melhor configuração: LSTM com 128 unidades, dropout 0,2 e janela de 168
+  horas (RMSLE de teste de 0,06276). A combinação de célula com portas e
+  janela semanal capta simultaneamente o ciclo diário e a tendência de
+  vários dias.
+- LSTM vs. RNN simples: a LSTM foi superior nas janelas de 24 h e 168 h e
+  convergiu em muito menos épocas na janela longa (8 vs. 21); a RNN simples
+  só foi competitiva na janela intermédia de 72 h. As variantes empilhada e
+  bidirecional não trouxeram ganhos, sendo a bidirecional consistentemente
+  inferior — coerente com a natureza causal do problema.
+- Janela temporal: o RMSLE da LSTM melhorou monotonicamente com o
+  alargamento da janela (0,06606 → 0,06367 → 0,06276), e o gap
+  treino/validação diminuiu (0,0517 → 0,0291 → 0,0237), indicando que mais
+  contexto melhora simultaneamente o desempenho e a generalização.
+- Limiar do enunciado: RMSLE de 0,06276 (< 1) — objetivo amplamente cumprido.
+
+### 5.3 Limitações Identificadas
+
+1. O estudo de data augmentation do problema CNN ficou comprometido por um
+   erro de gama de valores na camada RandomBrightness, impossibilitando
+   conclusões sobre o benefício real do aumento de dados; em trabalho futuro,
+   bastaria parametrizar value_range=(0, 1) ou aplicar o augmentation antes
+   da normalização.
+2. A CNN desenvolvida de raiz não foi avaliada no conjunto de teste (apenas
+   na validação), pelo que a comparação final com o MobileNetV2 em teste não
+   pôde ser apresentada; o F1 macro do modelo final também não foi
+   explicitamente registado.
+3. No problema RNN, apesar de o código prever a variação do número de
+   unidades e do dropout, apenas a configuração 128 unidades/dropout 0,2 foi
+   efetivamente avaliada em teste, reduzindo a amplitude da pesquisa de
+   hiperparâmetros.
+4. Restrições computacionais: todo o treino decorreu em CPU, com épocas de
+   até ≈22 minutos no modelo CNN sobredimensionado, o que limitou o número de
+   épocas (5–6 nas experiências CNN) e de configurações exploradas.
+5. As sete variedades de pera com F1 de 0,0 sugerem que a resolução de
+   entrada de 64×64/96×96 é insuficiente para distinguir classes quase
+   idênticas; resoluções maiores ou perdas sensíveis à semelhança entre
+   classes (por exemplo, label smoothing ou perdas hierárquicas) seriam
+   caminhos a explorar.
+
+---
+
+## SECÇÃO 6 — CONCLUSÕES
+
+Este trabalho cumpriu os objetivos definidos para os dois problemas. Na
+classificação de frutos com o dataset Fruits-360, a pesquisa sistemática de
+arquiteturas mostrou que uma CNN compacta com três blocos convolucionais,
+max-pooling e regularização adequada atinge 0,9981 de exatidão de validação,
+e que o transfer learning com MobileNetV2 (fine-tuning das 40 camadas
+superiores com taxa de aprendizagem de 1×10⁻⁵) eleva esse valor para 0,9998,
+tendo sido adotado como modelo final. No conjunto de teste, o modelo final
+obteve 93,96% de exatidão e 0,9513 de precisão e revocação macro, superando
+os limiares do enunciado (80% e 0,70, respetivamente); os erros remanescentes
+concentram-se em variedades de pera visualmente quase indistinguíveis.
+
+Na previsão de temperatura a 24 horas com o dataset Jena Climate, a
+comparação de quatro arquiteturas recorrentes e três janelas temporais
+mostrou que uma LSTM com 128 unidades e janela de 168 horas obtém o melhor
+desempenho — RMSLE de 0,06276 no teste, muito abaixo do limiar de 1, com RMSE
+de 2,97 °C e MAE de 2,35 °C. Confirmou-se a vantagem das células com portas
+sobre a RNN simples em sequências longas, a inutilidade da bidirecionalidade
+em previsão causal e o benefício consistente de janelas de contexto mais
+alargadas, tanto no erro como na generalização.
+
+As principais aprendizagens transversais foram: (i) a regularização (Dropout,
+L2, paragem antecipada) e a validação rigorosa são tão determinantes quanto a
+arquitetura; (ii) detalhes de pré-processamento aparentemente menores — como
+a coerência entre a gama de valores das imagens e as camadas de augmentation,
+ou a normalização com estatísticas exclusivamente do treino — podem
+inviabilizar ou viciar experiências completas; (iii) o transfer learning é a
+via mais eficiente para problemas de imagem com recursos limitados. Como
+trabalho futuro, propõe-se repetir o estudo de augmentation com a gama de
+valores corrigida, avaliar a CNN de raiz no conjunto de teste, alargar a
+pesquisa de unidades/dropout no problema RNN e explorar resoluções de entrada
+superiores para as classes de fruta mais ambíguas.
+
+---
+
+## APÊNDICE — INFORMAÇÃO TÉCNICA EXTRAÍDA DOS NOTEBOOKS
+
+### A. Hiperparâmetros e Configurações Testadas (CNN)
+
+[TABELA A1: Experiências CNN — todas com kernel 3×3, padding "same", lote 64,
+Adam (1×10⁻³), entropia cruzada categórica esparsa, paragem antecipada
+(paciência 3, monitor val_accuracy), entrada 64×64×3 salvo indicação]
+
+| Experiência | Filtros | Kernel | Pooling | Dropout | L2 | Augmentation | Épocas | Acc. Treino (última) | Acc. Val. (melhor) |
+|---|---|---|---|---|---|---|---|---|---|
+| Baseline (1.º treino) | (32, 64, 128) | 3×3 | Max | 0,0 | 0,0 | Não | 4 (ES) | 0,9917 | 0,9571 |
+| Baseline (grelha) | (32, 64, 128) | 3×3 | Max | 0,0 | 0,0 | Não | 5 | 0,9872 | 0,9985 |
+| Menos filtros | (16, 32, 64) | 3×3 | Max | 0,0 | 0,0 | Não | 5 | 0,9933 | 0,9966 |
+| Average pooling | (32, 64, 128) | 3×3 | Avg | 0,0 | 0,0 | Não | 5 | 0,9872 | 0,9943 |
+| Stride 2 (sem pooling) | (32, 64, 128) | 3×3 | — (stride 2) | 0,0 | 0,0 | Não | 4 (ES) | 0,9969 | 0,9706 |
+| Melhor CNN regularizada | (32, 64, 128) | 3×3 | Max | 0,4 | 1×10⁻⁴ | Não | 6 | 0,9597 | 0,9981 |
+| Comparação sem augmentation | (32, 64, 128) | 3×3 | Max | 0,4 | 1×10⁻⁴ | Não | 5 | 0,9486 | 0,9791 |
+| Comparação com augmentation | (32, 64, 128) | 3×3 | Max | 0,4 | 1×10⁻⁴ | Sim (defeituosa) | 4 (ES) | 0,0122 | 0,0000 |
+| Overfit deliberado | (128, 256, 512) | 3×3 | Max | 0,0 | 0,0 | Não | 6 (sem ES) | 0,9718 | 0,9900 |
+| Overfit regularizado | (128, 256, 512) | 3×3 | Max | 0,5 | 1×10⁻³ | Sim (defeituosa) | 6 | 0,0121 | 0,0000 |
+| MobileNetV2 fase 1 (base congelada) | pré-treinados | — | GAP | 0,4 | 0,0 | Não | 3 | 0,9916 | 0,9981 |
+| MobileNetV2 fase 2 (40 camadas, LR 1×10⁻⁵) | pré-treinados | — | GAP | 0,4 | 0,0 | Não | 3 (ES) | 0,9982 | 0,9998 |
+
+Notas: "ES" indica interrupção por paragem antecipada. As entradas do
+MobileNetV2 são 96×96×3, com pré-processamento próprio (escala [−1, 1]). As
+linhas marcadas "Sim (defeituosa)" usaram a cadeia de augmentation com a
+gama de valores incorreta descrita na Secção 3.4.
+
+### B. Hiperparâmetros e Configurações Testadas (RNN)
+
+[TABELA B1: Experiências RNN — todas com 128 unidades, dropout 0,2, cabeça
+Dense(32, ReLU)→Dense(1), lote 256, Adam (1×10⁻³, ReduceLROnPlateau fator
+0,5/paciência 3), perda MSE, métrica RMSLE com desvio 4,6742, máximo de 50
+épocas, paragem antecipada (paciência 5, monitor val_loss)]
+
+| Experiência | Tipo de Camada | Unidades | Janela (h) | Épocas executadas | RMSLE Teste |
+|---|---|---|---|---|---|
+| 1 | SimpleRNN | 128 | 24 | 6 | 0,06804 |
+| 2 | LSTM | 128 | 24 | 21 | 0,06606 |
+| 3 | LSTM empilhada (128+64) | 128/64 | 24 | 17 | 0,06547 |
+| 4 | LSTM bidirecional | 128 | 24 | 18 | 0,06645 |
+| 5 | SimpleRNN | 128 | 72 | 14 | 0,06340 |
+| 6 | LSTM | 128 | 72 | 10 | 0,06367 |
+| 7 | LSTM empilhada (128+64) | 128/64 | 72 | 12 | 0,06390 |
+| 8 | LSTM bidirecional | 128 | 72 | 10 | 0,06668 |
+| 9 | SimpleRNN | 128 | 168 | 21 | 0,06436 |
+| 10 | LSTM | 128 | 168 | 8 | 0,06276 |
+| 11 | LSTM empilhada (128+64) | 128/64 | 168 | 8 | 0,06328 |
+| 12 | LSTM bidirecional | 128 | 168 | 7 | 0,06447 |
+
+Nota: o RMSLE de validação por experiência não foi registado de forma
+individualizada nos outputs do notebook; o RMSLE de validação acompanhou os
+valores de teste durante o treino (ordem de grandeza 0,10 no espaço
+normalizado com desvio). [DADOS INSUFICIENTES para a coluna "RMSLE Val."
+por experiência.]
+
+### C. Ambiente de Desenvolvimento
+
+- Problema CNN: executado em ambiente Linux (sem GPU disponível;
+  TensorFlow otimizado com oneDNN/AVX2-FMA), TensorFlow/Keras 2.10.0;
+- Problema RNN: executado em Windows, Python 3.10, TensorFlow/Keras 2.16.2,
+  sem GPU;
+- Bibliotecas principais (requirements.txt do repositório): TensorFlow
+  2.16.2, Keras 3.3.3, NumPy 1.26.4, Pandas 2.2.2, Matplotlib 3.9.0,
+  Seaborn 0.13.2, Scikit-learn 1.5.0, kagglehub 0.2.9, visualkeras 0.1.3,
+  Pillow 10.3.0, tqdm 4.66.4, SciPy 1.13.1;
+- Reprodutibilidade: sementes aleatórias fixadas a 42 (Python, NumPy e
+  TensorFlow) em ambos os notebooks; datasets obtidos via kagglehub
+  (Fruits-360 [5] e Jena Climate [6]).
+
+---
+
+## REFERÊNCIAS BIBLIOGRÁFICAS
+
+[1] I. Goodfellow, Y. Bengio e A. Courville, *Deep Learning*. MIT Press,
+2016. Disponível em: https://www.deeplearningbook.org/
+
+[2] E. Charniak, *Introduction to Deep Learning*. MIT Press, 2019.
+
+[3] F. Chollet, *Deep Learning with Python*. Manning Publications, 2021.
+
+[4] TensorFlow, Documentação oficial. Disponível em:
+https://www.tensorflow.org/overview
+
+[5] Dataset Fruits-360. Disponível em: https://www.kaggle.com/moltean/fruits
+
+[6] Dataset Jena Climate. Disponível em:
+https://www.kaggle.com/datasets/mnassrib/jena-climate
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================
